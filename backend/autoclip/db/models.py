@@ -138,6 +138,9 @@ class Clip:
     hook: str = ""
     score: int = 0
     reason: str = ""
+    category: str = "transcript_moment"
+    confidence: float = 0.0
+    evidence_ids: list[str] = field(default_factory=list)
     status: ClipStatus = "candidate"
     user_trimmed: bool = False
     created_at: str = field(default_factory=utcnow)
@@ -160,6 +163,9 @@ class Clip:
             hook=row["hook"],
             score=row["score"],
             reason=row["reason"],
+            category=row["category"],
+            confidence=row["confidence"],
+            evidence_ids=json.loads(row["evidence_ids_json"] or "[]"),
             status=row["status"],
             user_trimmed=bool(row["user_trimmed"]),
             created_at=row["created_at"],

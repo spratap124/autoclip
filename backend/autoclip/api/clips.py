@@ -15,7 +15,7 @@ from ..db import store
 from ..db.models import Export, new_id
 from ..pipeline import captions as captions_module
 from ..pipeline import export as export_module
-from ..pipeline.reframe.croppath import CropPath, centre_crop
+from ..pipeline.reframe.croppath import CropPath, centre_crop, fit_full_frame
 from ..pipeline.runner import JobWorkspace
 from ..pipeline.transcript import Transcript, Word
 from .schemas import (
@@ -70,7 +70,13 @@ async def clip_words(clip_id: str) -> list[WordOut]:
     if edit is not None and edit.edited_words:
         return [WordOut(**word) for word in edit.edited_words]
 
-    transcript = await asyncio.to_thread(_load_transcript, clip.job_id)
+    transcript_path = JobWorkspace(clip.job_id).transcript
+    if not transcript_path.exists():
+        job = await asyncio.to_thread(store.get_job, clip.job_id)
+        if job and job.settings.get("mode") == "cs2":
+            return []
+        raise HTTPException(status_code=404, detail="This job has no transcript yet.")
+    transcript = await asyncio.to_thread(Transcript.load, transcript_path)
     words = transcript.slice(clip.start_word, clip.end_word)
     return [WordOut(text=w.text, start=w.start, end=w.end, speaker=w.speaker) for w in words]
 
@@ -90,8 +96,12 @@ async def clip_crop_path(clip_id: str) -> dict:
 
     cached = JobWorkspace(clip.job_id).crop_path(clip.id)
     if not cached.exists():
-        # Audio-only sources and pre-reframe jobs legitimately have none; the
-        # client falls back to a centre crop.
+        job = await asyncio.to_thread(store.get_job, clip.job_id)
+        if job and job.settings.get("mode") == "cs2":
+            source = await asyncio.to_thread(store.get_source, job.source_id)
+            if source and source.width and source.height:
+                return fit_full_frame(source.width, source.height, clip.duration_s).to_dict()
+        # Audio-only sources and pre-reframe jobs legitimately have none.
         raise HTTPException(status_code=404, detail="No crop path for this clip yet.")
 
     return (await asyncio.to_thread(CropPath.load, cached)).to_dict()
@@ -117,9 +127,16 @@ async def patch_clip(clip_id: str, payload: ClipPatchIn) -> ClipOut:
     start_word = end_word = None
 
     if trimmed:
-        transcript = await asyncio.to_thread(_load_transcript, clip.job_id)
-        first, last = transcript.indices_in_range(start_s, end_s)
-        start_word, end_word = first, max(first, last - 1)
+        transcript_path = JobWorkspace(clip.job_id).transcript
+        if transcript_path.exists():
+            transcript = await asyncio.to_thread(Transcript.load, transcript_path)
+            first, last = transcript.indices_in_range(start_s, end_s)
+            start_word, end_word = first, max(first, last - 1)
+        else:
+            job = await asyncio.to_thread(store.get_job, clip.job_id)
+            if not job or job.settings.get("mode") != "cs2":
+                raise HTTPException(status_code=404, detail="This job has no transcript yet.")
+            start_word = end_word = 0
 
     await asyncio.to_thread(
         store.update_clip,
@@ -196,10 +213,14 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
     workspace = JobWorkspace(clip.job_id)
     crop_path = await asyncio.to_thread(_crop_path_for, workspace, clip, source, payload.ratio)
 
+    export_id = new_id()
+    title = clip.title or f"clip-{clip.rank}"
+    if job.settings.get("mode") == "cs2":
+        # CS2 candidate titles repeat by category. Include a per-export suffix
+        # so different candidates and revised trims never overwrite each other.
+        title = f"{title}-clip-{clip.rank}-{export_id[:8]}"
     destination = (
-        paths.exports_dir()
-        / clip.job_id
-        / export_module.output_filename(clip.title or f"clip-{clip.rank}", payload.ratio)
+        paths.exports_dir() / clip.job_id / export_module.output_filename(title, payload.ratio)
     )
 
     request = export_module.ExportRequest(
@@ -224,7 +245,7 @@ async def export_clip(clip_id: str, payload: ExportRequestIn) -> ExportOut:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     record = Export(
-        id=new_id(),
+        id=export_id,
         clip_id=clip_id,
         path=str(destination),
         ratio=payload.ratio,
@@ -313,6 +334,11 @@ def _crop_path_for(workspace: JobWorkspace, clip, source, ratio: str) -> CropPat
     original one, so the geometry is recomputed rather than stretched.
     """
     cached = workspace.crop_path(clip.id)
+    job = store.get_job(clip.job_id)
+    if job and job.settings.get("mode") == "cs2":
+        return fit_full_frame(
+            source.width or 1920, source.height or 1080, clip.end_s - clip.start_s
+        )
     if cached.exists() and ratio == "9:16":
         return CropPath.load(cached)
 

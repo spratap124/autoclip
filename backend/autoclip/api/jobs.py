@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 
 from fastapi import APIRouter, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
+from .. import paths
 from ..config import load as load_settings
 from ..db import store
 from ..db.models import Job, new_id
 from ..jobs.events import broker
 from ..jobs.queue import queue
+from ..pipeline.cs2.models import CS2Settings
 from .schemas import JobCreateIn, JobOut, JobSettingsIn
 
 log = logging.getLogger(__name__)
@@ -53,6 +56,8 @@ async def create_job(payload: JobCreateIn) -> JobOut:
         raise HTTPException(status_code=404, detail="Source not found.")
 
     settings = _apply_overrides(load_settings(), payload.settings)
+    if payload.settings.mode == "cs2" and not source.has_video:
+        raise HTTPException(status_code=400, detail="CS2 mode requires a video source.")
     if settings.clips.min_duration_s >= settings.clips.max_duration_s:
         raise HTTPException(
             status_code=400, detail="Minimum clip length must be below the maximum."
@@ -61,8 +66,12 @@ async def create_job(payload: JobCreateIn) -> JobOut:
     job = Job(
         id=new_id(),
         source_id=source.id,
-        provider=settings.active_provider,
-        settings=settings.model_dump(mode="json"),
+        provider="" if payload.settings.mode == "cs2" else settings.active_provider,
+        settings=settings.model_dump(mode="json")
+        | {
+            "mode": payload.settings.mode,
+            "cs2": (payload.settings.cs2 or CS2Settings()).model_dump(mode="json"),
+        },
     )
     await asyncio.to_thread(store.create_job, job)
     queue.notify()
@@ -159,3 +168,22 @@ async def job_clips(job_id: str):
     from .clips import list_clips_for_job
 
     return await list_clips_for_job(job_id)
+
+
+@router.get("/{job_id}/evidence")
+async def job_evidence(job_id: str) -> list[dict]:
+    """Return the persisted local CS2 evidence records for a job."""
+    job = await asyncio.to_thread(store.get_job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    path = paths.job_work_dir(job_id) / "cs2" / "evidence.json"
+    if not path.is_file():
+        return []
+    try:
+        payload = await asyncio.to_thread(path.read_text, encoding="utf-8")
+        records = json.loads(payload)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail="Could not read job evidence.") from exc
+    if not isinstance(records, list):
+        raise HTTPException(status_code=500, detail="Job evidence cache is malformed.")
+    return records

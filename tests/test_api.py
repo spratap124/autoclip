@@ -96,6 +96,7 @@ class TestSettings:
 
         assert body["active_provider"] == "anthropic"
         assert body["whisper"]["model"] == "small"
+        assert body["ingest"]["cookies_from_browser"] == ""
 
     def test_partial_update_leaves_other_sections_alone(self, client: TestClient) -> None:
         client.put("/api/settings", json={"whisper": {"model": "large-v3"}})
@@ -191,17 +192,53 @@ class TestJobs:
         fetched = client.get(f"/api/jobs/{job_id}").json()
         assert fetched["status"] == "queued"
         assert fetched["source"]["title"] == "Test source"
+        assert fetched["mode"] == "cs2"
+        assert fetched["provider"] == ""
+        assert fetched["player_name"] is None
+
+    def test_selected_player_name_is_saved_with_cs2_job(
+        self, client: TestClient, source: Source
+    ) -> None:
+        response = client.post(
+            "/api/jobs",
+            json={
+                "source_id": source.id,
+                "settings": {"mode": "cs2", "cs2": {"local_player_name": "ThakurShaaab"}},
+            },
+        )
+        assert response.status_code == 201
+        assert response.json()["player_name"] == "ThakurShaaab"
+        fetched = client.get(f"/api/jobs/{response.json()['id']}")
+        assert fetched.json()["player_name"] == "ThakurShaaab"
+
+    def test_transcript_mode_remains_an_explicit_choice(
+        self, client: TestClient, source: Source
+    ) -> None:
+        response = client.post(
+            "/api/jobs", json={"source_id": source.id, "settings": {"mode": "transcript"}}
+        )
+        assert response.status_code == 201
+        assert response.json()["mode"] == "transcript"
+        assert response.json()["provider"]
 
     def test_overrides_are_applied(self, client: TestClient, source: Source) -> None:
         response = client.post(
             "/api/jobs",
             json={
                 "source_id": source.id,
-                "settings": {"provider": "ollama", "max_clips": 3},
+                "settings": {"mode": "transcript", "provider": "ollama", "max_clips": 3},
             },
         )
 
         assert response.json()["provider"] == "ollama"
+
+    def test_cs2_mode_is_provider_free(self, client: TestClient, source: Source) -> None:
+        response = client.post(
+            "/api/jobs", json={"source_id": source.id, "settings": {"mode": "cs2"}}
+        )
+        assert response.status_code == 201
+        assert response.json()["mode"] == "cs2"
+        assert response.json()["provider"] == ""
 
     def test_missing_source_is_404(self, client: TestClient) -> None:
         response = client.post("/api/jobs", json={"source_id": "nope"})
@@ -353,12 +390,105 @@ class TestClips:
         segment = body["segments"][0]
         assert {"start_s", "end_s", "width", "height", "keyframes", "fit"} <= segment.keys()
 
+    def test_cs2_review_crop_path_preserves_the_full_gameplay_frame(
+        self, client: TestClient, source: Source
+    ) -> None:
+        job = store.create_job(Job(id=new_id(), source_id=source.id, settings={"mode": "cs2"}))
+        clip = Clip(id=new_id(), job_id=job.id, start_s=5, end_s=20, rank=1)
+        store.replace_clips(job.id, [clip])
+
+        response = client.get(f"/api/clips/{clip.id}/crop-path")
+
+        assert response.status_code == 200
+        segment = response.json()["segments"][0]
+        assert segment["fit"] is True
+        assert segment["width"] == source.width
+        assert segment["height"] == source.height
+
+    def test_cs2_exports_get_unique_names_for_same_category(
+        self,
+        client: TestClient,
+        source: Source,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from autoclip.api import clips as clips_api
+
+        job = store.create_job(Job(id=new_id(), source_id=source.id, settings={"mode": "cs2"}))
+        candidates = [
+            Clip(
+                id=new_id(),
+                job_id=job.id,
+                rank=rank,
+                start_s=rank * 20,
+                end_s=rank * 20 + 15,
+                title="Multi Kill Sequence Potential",
+            )
+            for rank in (1, 2)
+        ]
+        store.replace_clips(job.id, candidates)
+
+        destinations = []
+
+        def fake_export(request, **_kwargs):
+            destinations.append(request.destination)
+            request.destination.parent.mkdir(parents=True, exist_ok=True)
+            request.destination.write_bytes(b"test mp4")
+            return request.destination
+
+        monkeypatch.setattr(clips_api.export_module, "export_clip", fake_export)
+        exports = [
+            client.post(
+                f"/api/clips/{clip.id}/export",
+                json={"ratio": "9:16", "style": "bold_pop", "write_srt": False},
+            )
+            for clip in candidates
+        ]
+
+        assert all(response.status_code == 201 for response in exports)
+        assert destinations[0] != destinations[1]
+
     def test_words_need_a_transcript(self, client: TestClient, job_with_clips: Job) -> None:
         # The job has clips but no transcript on disk, which is exactly the
         # state a partially-restored workspace would be in.
         clip_id = client.get(f"/api/jobs/{job_with_clips.id}/clips").json()[0]["id"]
 
         assert client.get(f"/api/clips/{clip_id}/words").status_code == 404
+
+    def test_cs2_clip_review_without_transcript(self, client: TestClient, source: Source) -> None:
+        job = store.create_job(Job(id=new_id(), source_id=source.id, settings={"mode": "cs2"}))
+        clip = Clip(
+            id=new_id(),
+            job_id=job.id,
+            start_s=5,
+            end_s=20,
+            rank=1,
+            category="audio_activity_potential",
+            confidence=0.72,
+            evidence_ids=["aud_000005"],
+            score=42,
+            reason="Potential activity; unverified.",
+        )
+        store.replace_clips(job.id, [clip])
+
+        words = client.get(f"/api/clips/{clip.id}/words")
+        listed = client.get(f"/api/jobs/{job.id}/clips").json()[0]
+        trimmed = client.patch(f"/api/clips/{clip.id}", json={"start_s": 6.0, "end_s": 18.0})
+
+        assert words.status_code == 200 and words.json() == []
+        assert listed["category"] == "audio_activity_potential"
+        assert listed["quality_score"] == 42
+        assert listed["confidence"] == pytest.approx(0.72)
+        assert listed["evidence_ids"] == ["aud_000005"]
+        assert trimmed.status_code == 200
+        assert trimmed.json()["start_s"] == 6
+
+    def test_job_evidence_endpoint_is_empty_before_detection(
+        self, client: TestClient, source: Source
+    ) -> None:
+        job = store.create_job(Job(id=new_id(), source_id=source.id, settings={"mode": "cs2"}))
+        response = client.get(f"/api/jobs/{job.id}/evidence")
+        assert response.status_code == 200
+        assert response.json() == []
 
 
 class TestProviderStatus:

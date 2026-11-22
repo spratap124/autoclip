@@ -45,6 +45,7 @@ export function ClipPlayer({
   cropPath?: CropPath | null
 }) {
   const video = useRef<HTMLVideoElement>(null)
+  const backgroundVideo = useRef<HTMLVideoElement>(null)
   const [playing, setPlaying] = useState(false)
   const [time, setTime] = useState(startS)
   const [volume, setVolume] = useState(readStoredVolume)
@@ -84,6 +85,7 @@ export function ClipPlayer({
     const element = video.current
     if (!element) return
     element.currentTime = startS
+    if (backgroundVideo.current) backgroundVideo.current.currentTime = startS
     setTime(startS)
     setPlaying(false)
     element.pause()
@@ -92,9 +94,17 @@ export function ClipPlayer({
   const onTimeUpdate = useCallback(() => {
     const element = video.current
     if (!element) return
+    if (
+      backgroundVideo.current &&
+      Math.abs(backgroundVideo.current.currentTime - element.currentTime) > 0.12
+    ) {
+      backgroundVideo.current.currentTime = element.currentTime
+    }
     if (element.currentTime >= endS) {
       element.pause()
       element.currentTime = startS
+      backgroundVideo.current?.pause()
+      if (backgroundVideo.current) backgroundVideo.current.currentTime = startS
       setPlaying(false)
       setTime(startS)
       return
@@ -110,9 +120,11 @@ export function ClipPlayer({
         element.currentTime = startS
       }
       void element.play()
+      if (backgroundVideo.current) void backgroundVideo.current.play()
       setPlaying(true)
     } else {
       element.pause()
+      backgroundVideo.current?.pause()
       setPlaying(false)
     }
   }
@@ -121,6 +133,7 @@ export function ClipPlayer({
   const duration = Math.max(0.01, endS - startS)
 
   const cropStyle = cropWindowStyle(cropPath, elapsed)
+  const fitWholeFrame = cropPath?.segments[0]?.fit ?? false
   const [aspectW, aspectH] = ASPECTS[ratio] ?? ASPECTS['9:16']
   // Height alone can't bound the box: with width:100% and an aspect-ratio, a
   // max-height clamp shortens the element without narrowing it, so the rendered
@@ -144,10 +157,25 @@ export function ClipPlayer({
           }
         }}
       >
+        {fitWholeFrame && ratio === '9:16' && (
+          <video
+            ref={backgroundVideo}
+            src={src}
+            className="absolute inset-0 size-full scale-110 object-cover blur-2xl brightness-75"
+            aria-hidden="true"
+            muted
+            playsInline
+            preload="auto"
+          />
+        )}
         <video
           ref={video}
           src={src}
-          className={cropStyle ? 'absolute max-w-none' : 'size-full object-cover'}
+          className={
+            cropStyle
+              ? 'absolute max-w-none'
+              : `relative size-full ${fitWholeFrame ? 'object-contain' : 'object-cover'}`
+          }
           style={cropStyle ?? undefined}
           onTimeUpdate={onTimeUpdate}
           preload="auto"

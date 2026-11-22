@@ -11,6 +11,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import numpy as np
 import pytest
 from autoclip.config import ExportSettings
 from autoclip.pipeline import captions, export, ffmpeg
@@ -111,6 +112,7 @@ class TestSingleSegmentRender:
         assert destination.exists()
         info = ffmpeg.probe(destination)
         assert (info.width, info.height) == (1080, 1920)
+
         assert info.has_audio
         assert info.duration_s == pytest.approx(5.0, abs=0.35)
 
@@ -208,6 +210,7 @@ class TestMultiSegmentRender:
 
         info = ffmpeg.probe(destination)
         assert (info.width, info.height) == (1080, 1920)
+
         assert info.duration_s == pytest.approx(5.0, abs=0.35)
 
     def test_segments_actually_show_different_regions(self, source_video, words, tmp_path) -> None:
@@ -298,6 +301,29 @@ class TestMultiSegmentRender:
 
         info = ffmpeg.probe(destination)
         assert (info.width, info.height) == (1080, 1920)
+
+        decoded = subprocess.run(
+            [
+                ffmpeg.ffmpeg_path(),
+                "-v",
+                "error",
+                "-i",
+                str(destination),
+                "-frames:v",
+                "1",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "gray",
+                "-",
+            ],
+            check=True,
+            capture_output=True,
+        ).stdout
+        frame = np.frombuffer(decoded, dtype=np.uint8).reshape(1920, 1080)
+        # The top band above the fitted source image should contain a blurred
+        # copy of the picture, not black fill.
+        assert float(frame[:500].std()) > 5.0
 
 
 class TestEncoding:

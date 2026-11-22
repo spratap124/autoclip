@@ -18,7 +18,10 @@ export function Ingest() {
   const [error, setError] = useState<ApiError | Error | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
   const [providers, setProviders] = useState<ProviderStatus[]>([])
-  const [overrides, setOverrides] = useState<JobSettingsOverrides>({})
+  const [overrides, setOverrides] = useState<JobSettingsOverrides>(() => ({
+    mode: 'cs2',
+    cs2: { local_player_name: readLastPlayerName() },
+  }))
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [dragging, setDragging] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -30,6 +33,13 @@ export function Ingest() {
 
   const start = useCallback(
     async (kind: 'url' | 'file', run: () => Promise<{ id: string }>) => {
+      if (
+        overrides.mode === 'cs2' &&
+        !overrides.cs2?.local_player_name?.trim()
+      ) {
+        setError(new Error('Enter the exact in-game player name for CS2 analysis.'))
+        return
+      }
       setBusy(kind)
       setError(null)
       try {
@@ -95,6 +105,37 @@ export function Ingest() {
               </button>
             </div>
           </form>
+
+          {(overrides.mode ?? 'cs2') === 'cs2' && (
+            <label htmlFor="cs2-player-name" className="mt-7 block max-w-md">
+              <span className="eyebrow">Player Name</span>
+              <input
+                id="cs2-player-name"
+                className="field mt-2 w-full"
+                value={overrides.cs2?.local_player_name ?? ''}
+                onChange={(event) => {
+                  const name = event.target.value
+                  setOverrides((current) => ({
+                    ...current,
+                    cs2: { ...current.cs2, local_player_name: name },
+                  }))
+                  try {
+                    window.localStorage.setItem('autoclip.cs2.player_name', name)
+                  } catch {
+                    // The field remains usable if browser storage is disabled.
+                  }
+                }}
+                placeholder="thakurshaaab"
+                maxLength={64}
+                autoComplete="off"
+                spellCheck={false}
+                required
+              />
+              <span className="mt-2 block text-xs text-ink-500">
+                Highlights will focus on kills attributed to this exact player.
+              </span>
+            </label>
+          )}
 
           <p className="mt-3 text-xs leading-relaxed text-ink-500">
             Only download video you own or have the rights to process.
@@ -162,7 +203,7 @@ export function Ingest() {
         </div>
       )}
 
-      {providers.length > 0 && !usableProvider && (
+      {(overrides.mode ?? 'cs2') !== 'cs2' && providers.length > 0 && !usableProvider && (
         <p className="mt-10 max-w-3xl border-l-2 border-sodium-600 pl-4 text-sm text-ink-300">
           No AI provider is reachable yet, so clip selection will fail. Add an API key or
           start Ollama in{' '}
@@ -176,6 +217,14 @@ export function Ingest() {
       <RecentJobs jobs={jobs} />
     </div>
   )
+}
+
+function readLastPlayerName(): string {
+  try {
+    return window.localStorage.getItem('autoclip.cs2.player_name') ?? 'thakurshaaab'
+  } catch {
+    return 'thakurshaaab'
+  }
 }
 
 function AdvancedOptions({
@@ -215,6 +264,42 @@ function AdvancedOptions({
       >
         <div className="overflow-hidden">
           <div className="grid gap-x-8 gap-y-5 pt-5 sm:grid-cols-2">
+            <Selector
+              label="Workflow"
+              value={overrides.mode ?? 'cs2'}
+              onChange={(v) => set('mode', v as 'transcript' | 'cs2')}
+              options={[
+                { value: 'transcript', label: 'Transcript highlights' },
+                { value: 'cs2', label: 'CS2 signals · no provider required' },
+              ]}
+            />
+            {overrides.mode === 'cs2' ? (
+              <div className="self-end text-xs leading-relaxed text-ink-500">
+                <p>
+                  Uses local kill-feed and round-result signals with sampled video and audio
+                  activity. Candidates are potential highlights, not confirmed aces or clutches.
+                </p>
+                <label className="mt-4 flex items-start gap-3 text-ink-300">
+                  <input
+                    type="checkbox"
+                    checked={overrides.cs2?.diagnostics_enabled ?? false}
+                    onChange={(event) =>
+                      onChange({
+                        ...overrides,
+                        cs2: {
+                          ...overrides.cs2,
+                          diagnostics_enabled: event.target.checked || undefined,
+                        },
+                      })
+                    }
+                    className="mt-0.5 size-4 shrink-0 accent-sodium-500"
+                  />
+                  <span>
+                    Save local CS2 diagnostics (OCR rows and up to 100 small HUD crops)
+                  </span>
+                </label>
+              </div>
+            ) : <>
             <Selector
               label="Provider"
               value={overrides.provider ?? ''}
@@ -276,6 +361,7 @@ function AdvancedOptions({
               />
               Multiple speakers — label who is talking, and cut to them
             </label>
+            </>}
           </div>
         </div>
       </div>

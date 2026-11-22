@@ -18,6 +18,7 @@ class Stage(StrEnum):
     PREPARE = "prepare"
     TRANSCRIBE = "transcribe"
     HIGHLIGHTS = "highlights"
+    CS2_DETECT = "cs2_detect"
     REFRAME = "reframe"
     CAPTIONS = "captions"
     EXPORT = "export"
@@ -28,6 +29,7 @@ class Stage(StrEnum):
             Stage.PREPARE: "Preparing media",
             Stage.TRANSCRIBE: "Transcribing",
             Stage.HIGHLIGHTS: "Finding highlights",
+            Stage.CS2_DETECT: "Analyzing gameplay signals",
             Stage.REFRAME: "Reframing to vertical",
             Stage.CAPTIONS: "Generating captions",
             Stage.EXPORT: "Exporting clips",

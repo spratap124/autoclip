@@ -31,6 +31,8 @@ export interface Job {
   progress: number
   error: string | null
   provider: string
+  mode: 'transcript' | 'cs2'
+  player_name: string | null
   created_at: string
   updated_at: string
   started_at: string | null
@@ -62,12 +64,27 @@ export interface Clip {
   title: string
   hook: string
   score: number
+  quality_score: number
+  confidence: number
+  category: string
+  evidence_ids: string[]
   reason: string
   status: ClipStatus
   user_trimmed: boolean
   caption_style: string
   ratio: string
   exports: ExportRecord[]
+}
+
+export interface EvidenceRecord {
+  event_id: string
+  start_s: number
+  end_s: number
+  evidence_type: string
+  detection_confidence: number
+  supporting_metadata: Record<string, unknown>
+  explanation: string
+  detector_version: string
 }
 
 export interface Word {
@@ -165,6 +182,23 @@ export interface SystemStatus {
 }
 
 export interface JobSettingsOverrides {
+  mode?: 'transcript' | 'cs2'
+  cs2?: {
+    local_player_name?: string
+    diagnostics_enabled?: boolean
+    diagnostics_max_crops?: number
+    frame_interval_s?: number
+    audio_window_s?: number
+    frame_width?: number
+    audio_activity_threshold_dbfs?: number
+    visual_change_threshold?: number
+    context_before_s?: number
+    context_after_s?: number
+    merge_gap_s?: number
+    min_candidate_s?: number
+    max_candidate_s?: number
+    max_candidates?: number
+  }
   provider?: string
   whisper_model?: string
   language?: string
@@ -254,6 +288,8 @@ export const api = {
   retryJob: (id: string) => request<Job>(`/api/jobs/${id}/retry`, { method: 'POST' }),
 
   listClips: (jobId: string) => request<Clip[]>(`/api/jobs/${jobId}/clips`),
+  getJobEvidence: (jobId: string) =>
+    request<EvidenceRecord[]>(`/api/jobs/${jobId}/evidence`),
   getClip: (clipId: string) => request<Clip>(`/api/clips/${clipId}`),
 
   getCropPath: (clipId: string) => request<CropPath>(`/api/clips/${clipId}/crop-path`),

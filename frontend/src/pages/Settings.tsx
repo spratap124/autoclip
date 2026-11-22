@@ -210,7 +210,7 @@ export function Settings() {
         <div className="grid gap-5 sm:grid-cols-2">
           <Select
             label="YouTube cookies from"
-            hint="YouTube blocks most anonymous downloads. Sign in in that browser and close it before downloading."
+            hint="Disabled by default. Choose a browser only if you explicitly want AutoClip to use that browser session."
             value={settings.ingest.cookies_from_browser}
             onChange={(value) =>
               patch({ ingest: { ...settings.ingest, cookies_from_browser: value } })

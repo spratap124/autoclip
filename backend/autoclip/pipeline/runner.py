@@ -26,6 +26,9 @@ from ..db.models import Clip, Export, Job, Source, new_id, utcnow
 from ..db.models import Transcript as TranscriptRow
 from ..providers import build_provider, detection_config
 from . import Stage, captions, export, ffmpeg, highlights, prepare, transcribe
+from .cs2.detector import analyze as analyze_cs2
+from .cs2.models import CS2Settings
+from .cs2.recognition import DETECTOR_VERSION
 from .prepare import Silence
 from .reframe import ReframeConfig, build_crop_path
 from .reframe.croppath import CropPath
@@ -39,6 +42,7 @@ STAGE_WEIGHTS: dict[Stage, float] = {
     Stage.PREPARE: 0.05,
     Stage.TRANSCRIBE: 0.35,
     Stage.HIGHLIGHTS: 0.15,
+    Stage.CS2_DETECT: 1.0,
     Stage.REFRAME: 0.20,
     Stage.CAPTIONS: 0.02,
     Stage.EXPORT: 0.23,
@@ -116,6 +120,8 @@ class PipelineRunner:
         self.job = job
         self.source = source
         self.settings = settings or load_settings()
+        self.mode = job.settings.get("mode", "transcript")
+        self.cs2_settings = CS2Settings.model_validate(job.settings.get("cs2", {}))
         self.on_progress = on_progress
         self._is_cancelled = is_cancelled or (lambda: False)
         self.workspace = JobWorkspace(job.id)
@@ -173,13 +179,16 @@ class PipelineRunner:
         store.update_job(self.job.id, status="running", started_at=utcnow(), error=None)
 
         try:
-            audio = self._stage_prepare()
-            transcript = self._stage_transcribe(audio)
-            silences = self._load_or_detect_silences(audio)
-            clips = await self._stage_highlights(transcript, silences)
-            crop_paths = self._stage_reframe(clips, transcript)
-            self._stage_captions(clips, transcript)
-            self._stage_export(clips, transcript, crop_paths)
+            if self.mode == "cs2":
+                clips = self._stage_cs2_detection()
+            else:
+                audio = self._stage_prepare()
+                transcript = self._stage_transcribe(audio)
+                silences = self._load_or_detect_silences(audio)
+                clips = await self._stage_highlights(transcript, silences)
+                crop_paths = self._stage_reframe(clips, transcript)
+                self._stage_captions(clips, transcript)
+                self._stage_export(clips, transcript, crop_paths)
         except JobCancelled:
             store.update_job(self.job.id, status="cancelled", finished_at=utcnow(), progress=0.0)
             raise
@@ -192,6 +201,66 @@ class PipelineRunner:
         return clips
 
     # -- stages ------------------------------------------------------------
+
+    def _stage_cs2_detection(self) -> list[Clip]:
+        """Run local evidence sampling and candidate generation only."""
+        stage = Stage.CS2_DETECT
+        self._check_cancelled()
+        existing = store.list_clips(self.job.id)
+        if existing:
+            self._finish_stage(stage)
+            return existing
+
+        self._emit(stage, 0.0, "Sampling video and audio activity")
+        try:
+            result = analyze_cs2(
+                self.source,
+                job_id=self.job.id,
+                cache_dir=self.workspace.root / "cs2",
+                settings=self.cs2_settings,
+                cancelled=self._is_cancelled,
+                on_progress=self._stage_progress(stage),
+            )
+        except ffmpeg.Cancelled as exc:
+            raise JobCancelled("CS2 analysis cancelled.") from exc
+
+        for rank, clip in enumerate(result.clips, start=1):
+            clip.rank = rank
+        store.replace_clips(self.job.id, result.clips)
+        metrics_path = self.workspace.root / "cs2" / "metrics.json"
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        metrics_path.write_text(
+            json.dumps(
+                {
+                    "detector_version": DETECTOR_VERSION,
+                    "elapsed_s": round(result.total_s, 3),
+                    "sampling_s": round(result.extraction_s, 3),
+                    "ocr_calls": result.ocr_calls,
+                    "ocr_s": round(result.ocr_s, 3),
+                    "candidate_generation_s": round(result.candidate_generation_s, 3),
+                    "sampled_frames": result.sampled_frames,
+                    "cache_bytes": result.cache_bytes,
+                    "cache_hit": result.cache_hit,
+                    "evidence_count": len(result.evidence),
+                    "candidate_count": len(result.candidates),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        log.info(
+            "CS2 event job %s: %.3fs, %d frames, %d OCR calls, %d evidence, "
+            "%d candidates, %.1f KiB cache",
+            self.job.id,
+            result.total_s,
+            result.sampled_frames,
+            result.ocr_calls,
+            len(result.evidence),
+            len(result.candidates),
+            result.cache_bytes / 1024,
+        )
+        self._finish_stage(stage)
+        return result.clips
 
     def _stage_prepare(self) -> Path:
         stage = Stage.PREPARE

@@ -6,13 +6,17 @@ import { ErrorNote } from '../components/ErrorNote'
 import { useJobStream } from '../useJobStream'
 
 /** Stage order and labels, mirroring autoclip.pipeline.Stage. */
-const STAGES = [
+const TRANSCRIPT_STAGES = [
   { key: 'prepare', label: 'Prepare', note: 'Extracting audio and thumbnails' },
   { key: 'transcribe', label: 'Transcribe', note: 'Word-level timing' },
   { key: 'highlights', label: 'Highlights', note: 'Choosing the moments worth cutting' },
   { key: 'reframe', label: 'Reframe', note: 'Tracking the speaker into vertical' },
   { key: 'captions', label: 'Captions', note: 'Building subtitle timing' },
   { key: 'export', label: 'Export', note: 'Rendering clips' },
+] as const
+
+const CS2_STAGES = [
+  { key: 'cs2_detect', label: 'Sample & score', note: 'Local video and audio activity evidence' },
 ] as const
 
 export function JobProgress() {
@@ -34,7 +38,8 @@ export function JobProgress() {
     return <p className="pt-24 text-sm text-ink-500">Loading…</p>
   }
 
-  const activeIndex = STAGES.findIndex((s) => s.key === job.current_stage)
+  const stages = job.mode === 'cs2' ? CS2_STAGES : TRANSCRIPT_STAGES
+  const activeIndex = stages.findIndex((s) => s.key === job.current_stage)
   const percent = Math.round((progress?.overall ?? job.progress) * 100)
 
   const cancel = async () => {
@@ -115,7 +120,7 @@ export function JobProgress() {
       )}
 
       <ol className="mt-12 max-w-3xl">
-        {STAGES.map((stage, index) => {
+        {stages.map((stage, index) => {
           // A failed job stopped *at* current_stage, so that stage must read as
           // failed rather than as still running — otherwise the checklist claims
           // work is in progress while the banner says it died.

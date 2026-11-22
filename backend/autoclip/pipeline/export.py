@@ -154,7 +154,7 @@ def _fit_chain(source_label: str, index: int, out_w: int, out_h: int) -> list[st
         f"{source_label}split=2[fitbg{index}][fitfg{index}]",
         (
             f"[fitbg{index}]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,"
-            f"crop={out_w}:{out_h},boxblur=24:2[bg{index}]"
+            f"crop={out_w}:{out_h},boxblur=32:2,eq=brightness=-0.10:saturation=0.85[bg{index}]"
         ),
         (
             f"[fitfg{index}]scale={out_w}:{out_h}:force_original_aspect_ratio=decrease:"

@@ -205,6 +205,24 @@ def centre_crop(
     )
 
 
+def fit_full_frame(source_width: int, source_height: int, duration_s: float) -> CropPath:
+    """Keep the complete source frame visible, with the renderer filling bars."""
+    return CropPath(
+        source_width=source_width,
+        source_height=source_height,
+        segments=[
+            CropSegment(
+                start_s=0.0,
+                end_s=duration_s,
+                width=source_width,
+                height=source_height,
+                strategy=Strategy.GENERAL,
+                fit=True,
+            )
+        ],
+    )
+
+
 def decimate(
     keyframes: list[CropKeyframe], *, limit: int = MAX_KEYFRAMES_PER_SEGMENT
 ) -> list[CropKeyframe]:

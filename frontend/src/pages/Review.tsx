@@ -8,6 +8,7 @@ import {
   type CaptionStyle,
   type Clip,
   type CropPath,
+  type EvidenceRecord,
   type Job,
   type Word,
 } from '../api'
@@ -22,6 +23,7 @@ export function Review() {
   const { jobId } = useParams()
   const [job, setJob] = useState<Job | null>(null)
   const [clips, setClips] = useState<Clip[]>([])
+  const [evidence, setEvidence] = useState<EvidenceRecord[]>([])
   const [styles, setStyles] = useState<CaptionStyle[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [words, setWords] = useState<Word[]>([])
@@ -33,11 +35,17 @@ export function Review() {
 
   useEffect(() => {
     if (!jobId) return
-    void Promise.all([api.getJob(jobId), api.listClips(jobId), api.captionStyles()])
-      .then(([loadedJob, loadedClips, loadedStyles]) => {
+    void Promise.all([
+      api.getJob(jobId),
+      api.listClips(jobId),
+      api.captionStyles(),
+      api.getJobEvidence(jobId).catch(() => []),
+    ])
+      .then(([loadedJob, loadedClips, loadedStyles, loadedEvidence]) => {
         setJob(loadedJob)
         setClips(loadedClips)
         setStyles(loadedStyles)
+        setEvidence(loadedEvidence)
         setSelectedId((current) => current ?? loadedClips[0]?.id ?? null)
       })
       .catch((err) => setError(err as Error))
@@ -138,6 +146,15 @@ export function Review() {
 
   const keptCount = clips.filter((clip) => clip.status === 'kept').length
   const activeStyle = styles.find((style) => style.key === selected?.caption_style)
+  const hasTranscript = job?.mode !== 'cs2'
+  const selectedPlayerKillCount = selected
+    ? evidence.filter(
+        (item) =>
+          selected.evidence_ids.includes(item.event_id) &&
+          item.supporting_metadata?.selected_player_role === 'attacker' &&
+          Number(item.supporting_metadata?.attribution_confidence) >= 0.9,
+      ).length
+    : 0
 
   if (error && clips.length === 0) {
     return (
@@ -159,6 +176,9 @@ export function Review() {
           <h1 className="mt-2 max-w-2xl truncate font-display text-[clamp(1.5rem,3vw,2.25rem)] leading-tight text-ink-100">
             {job.source?.title || 'Untitled'}
           </h1>
+          {job.mode === 'cs2' && job.player_name && (
+            <p className="mt-2 text-xs text-ink-500">Player focus: {job.player_name}</p>
+          )}
         </div>
 
         <div className="flex items-baseline gap-6">
@@ -243,20 +263,42 @@ export function Review() {
                       “{selected.hook}”
                     </p>
                   )}
+                  {selected.category !== 'transcript_moment' && (
+                    <p className="mt-3 text-xs text-ink-500">
+                      {job.mode === 'cs2' && 'Potential · '}
+                      {selected.category.replaceAll('_', ' ')}
+                      {job.mode === 'cs2' && selectedPlayerKillCount > 0 &&
+                        ` · ${selectedPlayerKillCount} attributed ${selectedPlayerKillCount === 1 ? 'kill' : 'kills'}`}
+                      {' · detection confidence '}
+                      {(selected.confidence * 100).toFixed(0)}% · quality {selected.quality_score}/100
+                      {selected.evidence_ids.length > 0 && (
+                        <span className="mt-1 block break-words text-ink-600">
+                          {evidence
+                            .filter((item) => selected.evidence_ids.includes(item.event_id))
+                            .slice(0, 5)
+                            .map((item) => `${item.event_id}: ${item.explanation}`)
+                            .join(' · ') || `Evidence IDs: ${selected.evidence_ids.slice(0, 5).join(', ')}`}
+                          {selected.evidence_ids.length > 5 ? ' · …' : ''}
+                        </span>
+                      )}
+                    </p>
+                  )}
                 </div>
 
-                <CaptionEditor
-                  words={words}
-                  onChange={(next) => {
-                    setWords(next)
-                    setWordsDirty(true)
-                  }}
-                  onSave={saveWords}
-                  saving={savingWords}
-                  dirty={wordsDirty}
-                />
+                {hasTranscript && (
+                  <CaptionEditor
+                    words={words}
+                    onChange={(next) => {
+                      setWords(next)
+                      setWordsDirty(true)
+                    }}
+                    onSave={saveWords}
+                    saving={savingWords}
+                    dirty={wordsDirty}
+                  />
+                )}
 
-                <div>
+                {hasTranscript && <div>
                   <p className="eyebrow border-b border-ink-800 pb-2">Caption style</p>
                   <div className="mt-3 space-y-1">
                     {styles.map((style) => (
@@ -277,7 +319,7 @@ export function Review() {
                       </button>
                     ))}
                   </div>
-                </div>
+                </div>}
 
                 <div>
                   <p className="eyebrow border-b border-ink-800 pb-2">Aspect ratio</p>
@@ -371,10 +413,10 @@ function ClipRow({
       <span
         className={[
           'numeric self-start font-display text-2xl leading-none',
-          clip.score >= 85 ? 'text-sodium-500' : selected ? 'text-ink-200' : 'text-ink-500',
+          clip.quality_score >= 85 ? 'text-sodium-500' : selected ? 'text-ink-200' : 'text-ink-500',
         ].join(' ')}
       >
-        {clip.score}
+        {clip.quality_score}
       </span>
 
       <div className="min-w-0">

@@ -13,6 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..db import models
+from ..pipeline.cs2.models import CS2Settings
 
 
 class SourceOut(BaseModel):
@@ -59,6 +60,8 @@ class YouTubeIngestIn(BaseModel):
 class JobSettingsIn(BaseModel):
     """Per-job overrides. Anything omitted falls back to saved settings."""
 
+    mode: Literal["transcript", "cs2"] = "cs2"
+    cs2: CS2Settings | None = None
     provider: str | None = None
     whisper_model: str | None = None
     language: str | None = None
@@ -83,6 +86,8 @@ class JobOut(BaseModel):
     progress: float
     error: str | None = None
     provider: str
+    mode: Literal["transcript", "cs2"] = "transcript"
+    player_name: str | None = None
     created_at: str
     updated_at: str
     started_at: str | None = None
@@ -99,6 +104,12 @@ class JobOut(BaseModel):
             progress=job.progress,
             error=job.error,
             provider=job.provider,
+            mode=job.settings.get("mode", "transcript"),
+            player_name=(
+                (job.settings.get("cs2") or {}).get("local_player_name") or None
+                if job.settings.get("mode") == "cs2"
+                else None
+            ),
             created_at=job.created_at,
             updated_at=job.updated_at,
             started_at=job.started_at,
@@ -148,6 +159,10 @@ class ClipOut(BaseModel):
     title: str
     hook: str
     score: int
+    quality_score: int
+    confidence: float
+    category: str
+    evidence_ids: list[str] = Field(default_factory=list)
     reason: str
     status: str
     user_trimmed: bool
@@ -175,6 +190,10 @@ class ClipOut(BaseModel):
             title=clip.title,
             hook=clip.hook,
             score=clip.score,
+            quality_score=clip.score,
+            confidence=clip.confidence,
+            category=clip.category,
+            evidence_ids=clip.evidence_ids,
             reason=clip.reason,
             status=clip.status,
             user_trimmed=clip.user_trimmed,

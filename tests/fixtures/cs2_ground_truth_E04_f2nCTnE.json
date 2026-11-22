@@ -1,0 +1,71 @@
+{
+  "video_id": "E04_f2nCTnE",
+  "title": "FACEIT Level 6 Grind | Road to Level 10 #5 | ThakurShaaab LIVE",
+  "duration_s": 525.6,
+  "resolution": "1920x1080",
+  "fps": 60,
+  "annotation_method": "Manual frame review of the listed intervals; event times are the first sampled frame showing the new HUD row/banner, with ±1 s tolerance. A later audit corrected two selected-player kill-feed timestamps that were initially annotated several seconds late.",
+  "annotated_intervals_s": [[320, 348], [380, 410], [428, 448]],
+  "events": [
+    {
+      "timestamp_s": 324,
+      "type": "kill_feed_change",
+      "description": "hach1mi + AmiaQVO kill ThakurShaaab; manually confirmed visible in the 324.0 s sample"
+    },
+    {
+      "timestamp_s": 334,
+      "type": "kill_feed_change",
+      "description": "ink549 kills V_SinneR"
+    },
+    {
+      "timestamp_s": 336,
+      "type": "kill_feed_change",
+      "description": "AmiaQVO + hach1mi kill Eagleeye08"
+    },
+    {
+      "timestamp_s": 337,
+      "type": "kill_feed_change",
+      "description": "hach1mi kills RyukZ"
+    },
+    {
+      "timestamp_s": 338,
+      "type": "round_transition",
+      "description": "TEAM HACHIMI WINS THE ROUND banner"
+    },
+    {
+      "timestamp_s": 386,
+      "type": "kill_feed_change",
+      "description": "hach1mi kills swp_lucky"
+    },
+    {
+      "timestamp_s": 386,
+      "type": "kill_feed_change",
+      "description": "hach1mi kills Eagleeye08"
+    },
+    {
+      "timestamp_s": 385,
+      "type": "kill_feed_change",
+      "description": "ThakurShaaab + V_SinneR kill hach1mi; manually confirmed visible in the 385.0 s sample (previously annotated at 388 s)"
+    },
+    {
+      "timestamp_s": 393,
+      "type": "kill_feed_change",
+      "description": "CO1DFISH kills RyukZ"
+    },
+    {
+      "timestamp_s": 398,
+      "type": "kill_feed_change",
+      "description": "fgifoohoir kills V_SinneR"
+    },
+    {
+      "timestamp_s": 432,
+      "type": "kill_feed_change",
+      "description": "CO1DFISH + AmiaQVO kill ThakurShaaab"
+    },
+    {
+      "timestamp_s": 432,
+      "type": "round_transition",
+      "description": "TEAM HACHIMI WINS THE ROUND banner"
+    }
+  ]
+}
