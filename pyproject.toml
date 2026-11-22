@@ -37,6 +37,9 @@ dependencies = [
   "keyring>=25.4",
   # Ingest
   "yt-dlp>=2026.1.1",
+  # Local CS2 Source 2 demo parsing. Keep pinned until parser schema behavior
+  # has been checked against the real-demo fixture in this repository.
+  "demoparser2==0.42.2",
   # Transcription
   "faster-whisper>=1.1",
   # Reframe

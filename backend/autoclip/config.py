@@ -22,7 +22,7 @@ import stat
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, PrivateAttr
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from . import paths
 
@@ -82,6 +82,60 @@ class IngestSettings(BaseModel):
     prefer_youtube_captions: bool = False
 
 
+class CS2DemoSettings(BaseModel):
+    """Resource limits for local demo upload and parsing."""
+
+    max_upload_bytes: int = Field(default=2_000_000_000, ge=1_048_576)
+    parser_timeout_s: int = Field(default=600, ge=30, le=3600)
+    parser_memory_limit_mb: int = Field(default=4096, ge=512, le=32768)
+    tick_rate_override: float | None = Field(default=None, gt=0, le=256)
+    pre_roll_s: float = Field(default=4.0, ge=0, le=60)
+    post_roll_s: float = Field(default=5.0, ge=0, le=120)
+    won_clutch_post_roll_s: float = Field(default=8.0, ge=0, le=120)
+    min_clip_duration_s: float = Field(default=8.0, ge=1, le=120)
+    max_clip_duration_s: float = Field(default=120.0, ge=1, le=600)
+    fast_multi_kill_s: float = Field(default=5.0, gt=0, le=60)
+    headshot_streak_kills: int = Field(default=2, ge=2, le=5)
+    strict_clutches: bool = True
+    default_visible_tags: list[str] = Field(default_factory=list, max_length=30)
+
+    @field_validator("default_visible_tags")
+    @classmethod
+    def validate_default_visible_tags(cls, tags: list[str]) -> list[str]:
+        allowed = {
+            "multi_kill",
+            "2K",
+            "3K",
+            "4K",
+            "5K",
+            "ace",
+            "clutch_1v1",
+            "clutch_1v2",
+            "clutch_1v3",
+            "clutch_1v4",
+            "clutch_1v5",
+            "clutch_won",
+            "clutch_lost",
+            "clutch_unknown",
+            "opening_kill",
+            "special_kills",
+            "round_winning_elimination",
+            "headshot",
+            "headshot_streak",
+            "wallbang",
+            "no_scope",
+            "through_smoke",
+            "blind_kill",
+            "knife_kill",
+            "awp_multi_kill",
+            "fast_multi_kill",
+        }
+        unknown = set(tags) - allowed
+        if unknown:
+            raise ValueError(f"Unsupported CS2 highlight tags: {', '.join(sorted(unknown))}")
+        return list(dict.fromkeys(tags))
+
+
 class ExportSettings(BaseModel):
     ratio: Literal["9:16", "1:1", "16:9"] = "9:16"
     caption_style: str = "bold_pop"
@@ -109,6 +163,7 @@ class Settings(BaseModel):
     whisper: WhisperSettings = Field(default_factory=WhisperSettings)
     clips: ClipSettings = Field(default_factory=ClipSettings)
     ingest: IngestSettings = Field(default_factory=IngestSettings)
+    cs2_demo: CS2DemoSettings = Field(default_factory=CS2DemoSettings)
     export: ExportSettings = Field(default_factory=ExportSettings)
 
     #: Set when secrets had to be written to config.json because no keyring

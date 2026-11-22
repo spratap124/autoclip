@@ -701,5 +701,128 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes}:{secs:02d}"
 
 
+cs2demo_app = typer.Typer(
+    name="cs2demo",
+    help="Inspect and analyze local CS2 demo files.",
+    no_args_is_help=True,
+)
+
+
+def _parse_demo_cached_cli(demo_path: Path):
+    from .cs2demo.adapter import DemoParseError
+    from .cs2demo.cache import parse_cached
+
+    parser_settings = config.load().cs2_demo
+    try:
+        return parse_cached(
+            demo_path,
+            timeout_s=parser_settings.parser_timeout_s,
+            memory_limit_mb=parser_settings.parser_memory_limit_mb,
+        )
+    except DemoParseError as exc:
+        console.print(f"[red]Demo parse failed.[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+
+@cs2demo_app.command("inspect")
+def inspect_cs2_demo(demo_path: Path) -> None:
+    """Parse a local demo (or reuse its normalized cache) and print an overview."""
+    import json
+
+    parsed, cache_hit = _parse_demo_cached_cli(demo_path)
+    console.print(
+        json.dumps(
+            {
+                "sha256": parsed.content_sha256,
+                "parser_version": parsed.parser_version,
+                "schema_version": parsed.schema_version,
+                "header": parsed.header,
+                "players": [
+                    {
+                        "session_id": player.session_id,
+                        "steamid": player.steamid,
+                        "name": player.name,
+                        "team_number": player.team_number,
+                    }
+                    for player in parsed.players
+                ],
+                "event_counts": {name: len(rows) for name, rows in parsed.events.items()},
+                "warnings": parsed.warnings,
+                "cache_hit": cache_hit,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+@cs2demo_app.command("players")
+def list_cs2_demo_players(demo_path: Path) -> None:
+    """Print parser-resolved players in a local demo."""
+    parsed, _ = _parse_demo_cached_cli(demo_path)
+    table = Table(title="CS2 demo players", header_style="bold")
+    table.add_column("Session ID")
+    table.add_column("SteamID64")
+    table.add_column("Name")
+    table.add_column("Team")
+    for player in parsed.players:
+        table.add_row(
+            player.session_id,
+            str(player.steamid) if player.steamid is not None else "unknown",
+            player.name or "unknown",
+            str(player.team_number) if player.team_number is not None else "unknown",
+        )
+    console.print(table)
+
+
+@cs2demo_app.command("analyze")
+def analyze_cs2_demo(
+    demo_path: Path,
+    steamid: str = typer.Option(..., "--steamid", help="Selected player's SteamID64."),
+) -> None:
+    """Print player highlight analysis as JSON, reusing the normalized cache."""
+    import json
+
+    from .cs2demo.analyze import analyze_player
+    from .cs2demo.detection_models import DetectionSettings
+
+    if not steamid.isdecimal():
+        console.print("[red]SteamID64 must contain decimal digits only.[/red]")
+        raise typer.Exit(2)
+    settings = config.load().cs2_demo
+    parsed, _cache_hit = _parse_demo_cached_cli(demo_path)
+    detection = DetectionSettings(
+        tick_rate_override=settings.tick_rate_override,
+        pre_roll_s=settings.pre_roll_s,
+        post_roll_s=settings.post_roll_s,
+        won_clutch_post_roll_s=settings.won_clutch_post_roll_s,
+        min_clip_duration_s=settings.min_clip_duration_s,
+        max_clip_duration_s=settings.max_clip_duration_s,
+        fast_multi_kill_s=settings.fast_multi_kill_s,
+        headshot_streak_kills=settings.headshot_streak_kills,
+        strict_clutches=settings.strict_clutches,
+    )
+    try:
+        result = analyze_player(parsed, f"steamid:{int(steamid)}", detection)
+    except ValueError as exc:
+        console.print(f"[red]Analysis failed.[/red] {exc}")
+        raise typer.Exit(2) from exc
+    console.print(
+        json.dumps(
+            {
+                "demo_sha256": result.demo_sha256,
+                "player_id": result.player_id,
+                "highlights": [highlight.to_dict() for highlight in result.highlights],
+                "warnings": result.warnings,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+app.add_typer(cs2demo_app, name="cs2demo")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()

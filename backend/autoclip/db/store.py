@@ -15,6 +15,8 @@ from .models import (
     Clip,
     ClipEdit,
     ClipStatus,
+    DemoFile,
+    DemoParseJob,
     Export,
     Job,
     JobStatus,
@@ -24,6 +26,177 @@ from .models import (
 )
 
 # --------------------------------------------------------------------------
+# Sources
+# --------------------------------------------------------------------------
+
+
+def create_demo(demo: DemoFile) -> DemoFile:
+    with connection() as conn:
+        conn.execute(
+            """INSERT INTO demos (id, content_sha256, file_path, original_filename,
+                                  size_bytes, parser_version, schema_version,
+                                  parse_status, warnings_json, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                demo.id,
+                demo.content_sha256,
+                demo.file_path,
+                demo.original_filename,
+                demo.size_bytes,
+                demo.parser_version,
+                demo.schema_version,
+                demo.parse_status,
+                json.dumps(demo.warnings),
+                demo.created_at,
+            ),
+        )
+    return demo
+
+
+def get_demo(demo_id: str) -> DemoFile | None:
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM demos WHERE id = ?", (demo_id,)).fetchone()
+    return DemoFile.from_row(row) if row else None
+
+
+def get_demo_by_hash(content_sha256: str) -> DemoFile | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM demos WHERE content_sha256 = ?", (content_sha256,)
+        ).fetchone()
+    return DemoFile.from_row(row) if row else None
+
+
+def update_demo_parse(
+    demo_id: str,
+    *,
+    status: str,
+    parser_version: str = "",
+    schema_version: int = 1,
+    warnings: list[str] | None = None,
+) -> None:
+    with connection() as conn:
+        conn.execute(
+            """UPDATE demos SET parse_status = ?, parser_version = ?, schema_version = ?,
+                                warnings_json = ? WHERE id = ?""",
+            (status, parser_version, schema_version, json.dumps(warnings or []), demo_id),
+        )
+
+
+def delete_demo(demo_id: str) -> DemoFile | None:
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM demos WHERE id = ?", (demo_id,)).fetchone()
+        if row is None:
+            return None
+        conn.execute("DELETE FROM demos WHERE id = ?", (demo_id,))
+    return DemoFile.from_row(row)
+
+
+def create_demo_job(job: DemoParseJob) -> DemoParseJob:
+    with connection() as conn:
+        conn.execute(
+            """INSERT INTO demo_jobs (id, demo_id, status, current_stage, progress,
+                                      error, created_at, updated_at, started_at, finished_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job.id,
+                job.demo_id,
+                job.status,
+                job.current_stage,
+                job.progress,
+                job.error,
+                job.created_at,
+                job.updated_at,
+                job.started_at,
+                job.finished_at,
+            ),
+        )
+    return job
+
+
+def get_demo_job(job_id: str) -> DemoParseJob | None:
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM demo_jobs WHERE id = ?", (job_id,)).fetchone()
+    return DemoParseJob.from_row(row) if row else None
+
+
+def next_queued_demo_job() -> DemoParseJob | None:
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM demo_jobs WHERE status = 'queued' ORDER BY created_at LIMIT 1"
+        ).fetchone()
+    return DemoParseJob.from_row(row) if row else None
+
+
+def list_demo_jobs(*, demo_id: str | None = None, limit: int = 50) -> list[DemoParseJob]:
+    with connection() as conn:
+        if demo_id:
+            rows = conn.execute(
+                "SELECT * FROM demo_jobs WHERE demo_id = ? ORDER BY created_at DESC LIMIT ?",
+                (demo_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM demo_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+    return [DemoParseJob.from_row(row) for row in rows]
+
+
+def update_demo_job(
+    job_id: str,
+    *,
+    status: str | None = None,
+    current_stage: str | None = None,
+    progress: float | None = None,
+    error: str | None = None,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+) -> None:
+    fields: dict[str, Any] = {"updated_at": utcnow()}
+    for name, value in (
+        ("status", status),
+        ("current_stage", current_stage),
+        ("progress", progress),
+        ("error", error),
+        ("started_at", started_at),
+        ("finished_at", finished_at),
+    ):
+        if value is not None:
+            fields[name] = value
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    with connection() as conn:
+        conn.execute(
+            f"UPDATE demo_jobs SET {assignments} WHERE id = ?",
+            (*fields.values(), job_id),
+        )
+
+
+def put_demo_analysis(
+    demo_id: str, player_id: str, settings_hash: str, result: dict[str, Any]
+) -> None:
+    with connection() as conn:
+        conn.execute(
+            """INSERT INTO demo_analyses (demo_id, player_id, settings_hash,
+                                          result_json, created_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(demo_id, player_id, settings_hash) DO UPDATE SET
+                 result_json = excluded.result_json, created_at = excluded.created_at""",
+            (demo_id, player_id, settings_hash, json.dumps(result), utcnow()),
+        )
+
+
+def get_demo_analysis(
+    demo_id: str, player_id: str, settings_hash: str
+) -> dict[str, Any] | None:
+    with connection() as conn:
+        row = conn.execute(
+            """SELECT result_json FROM demo_analyses
+               WHERE demo_id = ? AND player_id = ? AND settings_hash = ?""",
+            (demo_id, player_id, settings_hash),
+        ).fetchone()
+    return json.loads(row["result_json"]) if row else None
+
+
 # Sources
 # --------------------------------------------------------------------------
 

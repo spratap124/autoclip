@@ -221,6 +221,43 @@ export function Settings() {
         </div>
       </Section>
 
+      <Section
+        title="CS2 demo analysis"
+        note="Detection runs from local demo events. Changing these values recomputes selected-player highlights from the existing cache; it does not parse the demo again."
+      >
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <NumberField label="Pre-roll (s)" value={settings.cs2_demo.pre_roll_s} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, pre_roll_s: value } })} />
+          <NumberField label="Post-roll (s)" value={settings.cs2_demo.post_roll_s} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, post_roll_s: value } })} />
+          <NumberField label="Won clutch post-roll (s)" value={settings.cs2_demo.won_clutch_post_roll_s} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, won_clutch_post_roll_s: value } })} />
+          <NumberField label="Minimum suggested duration (s)" value={settings.cs2_demo.min_clip_duration_s} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, min_clip_duration_s: value } })} />
+          <NumberField label="Maximum suggested duration (s)" value={settings.cs2_demo.max_clip_duration_s} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, max_clip_duration_s: value } })} />
+          <NumberField label="Fast multi-kill threshold (s)" value={settings.cs2_demo.fast_multi_kill_s} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, fast_multi_kill_s: value } })} />
+          <NumberField label="Headshot streak kills" value={settings.cs2_demo.headshot_streak_kills} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, headshot_streak_kills: value } })} />
+          <NumberField label="Tick-rate override (0 = unset)" value={settings.cs2_demo.tick_rate_override ?? 0} onCommit={(value) => patch({ cs2_demo: { ...settings.cs2_demo, tick_rate_override: value > 0 ? value : null } })} />
+          <Field
+            label="Default visible tags"
+            hint="Comma-separated supported tags; leave empty to show every detected highlight."
+            value={settings.cs2_demo.default_visible_tags.join(', ')}
+            placeholder="3K, ace, clutch_won"
+            onCommit={(value) => patch({
+              cs2_demo: {
+                ...settings.cs2_demo,
+                default_visible_tags: value.split(',').map((tag) => tag.trim()).filter(Boolean),
+              },
+            })}
+          />
+        </div>
+        <label className="mt-5 flex items-center gap-3 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={settings.cs2_demo.strict_clutches}
+            onChange={(event) => patch({ cs2_demo: { ...settings.cs2_demo, strict_clutches: event.target.checked } })}
+            className="size-4 accent-sodium-500"
+          />
+          Require complete alive-player state for clutch detection
+        </label>
+      </Section>
+
       <Section title="Export">
         <div className="grid gap-5 sm:grid-cols-2">
           <Select

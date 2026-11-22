@@ -97,6 +97,35 @@ class TestSettings:
         assert body["active_provider"] == "anthropic"
         assert body["whisper"]["model"] == "small"
         assert body["ingest"]["cookies_from_browser"] == ""
+        assert body["cs2_demo"]["max_upload_bytes"] == 2_000_000_000
+
+    def test_cs2_demo_limits_can_be_updated_and_validated(self, client: TestClient) -> None:
+        response = client.put("/api/settings", json={"cs2_demo": {"parser_timeout_s": 300}})
+        assert response.status_code == 200
+        assert response.json()["cs2_demo"]["parser_timeout_s"] == 300
+        timing = client.put(
+            "/api/settings",
+            json={"cs2_demo": {"pre_roll_s": 6, "min_clip_duration_s": 12}},
+        )
+        assert timing.status_code == 200
+        assert timing.json()["cs2_demo"]["min_clip_duration_s"] == 12
+        tag_settings = client.put(
+            "/api/settings",
+            json={"cs2_demo": {"default_visible_tags": ["2K", "clutch_won"]}},
+        )
+        assert tag_settings.status_code == 200
+        assert tag_settings.json()["cs2_demo"]["default_visible_tags"] == ["2K", "clutch_won"]
+        invalid_timing = client.put(
+            "/api/settings", json={"cs2_demo": {"max_clip_duration_s": 10}}
+        )
+        assert invalid_timing.status_code == 400
+        invalid_tags = client.put(
+            "/api/settings", json={"cs2_demo": {"default_visible_tags": ["aimbot"]}}
+        )
+        assert invalid_tags.status_code == 400
+
+        invalid = client.put("/api/settings", json={"cs2_demo": {"parser_timeout_s": 1}})
+        assert invalid.status_code == 400
 
     def test_partial_update_leaves_other_sections_alone(self, client: TestClient) -> None:
         client.put("/api/settings", json={"whisper": {"model": "large-v3"}})
@@ -244,6 +273,73 @@ class TestJobs:
         response = client.post("/api/jobs", json={"source_id": "nope"})
 
         assert response.status_code == 404
+
+
+class TestCs2DemoUpload:
+    def test_upload_validates_signature_and_hides_local_path(self, client: TestClient) -> None:
+        from autoclip.cs2demo.adapter import CS2_DEMO_MAGIC
+
+        response = client.post(
+            "/api/demos/upload",
+            files={
+                "file": ("../match.dem", CS2_DEMO_MAGIC + b"fixture", "application/octet-stream")
+            },
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["original_filename"] == "match.dem"
+        assert body["parse_status"] == "uploaded"
+        assert body["duplicate"] is False
+        assert "file_path" not in body
+        assert "autoclip_home" not in response.text
+
+    def test_duplicate_content_reuses_existing_demo(self, client: TestClient) -> None:
+        from autoclip.cs2demo.adapter import CS2_DEMO_MAGIC
+
+        payload = CS2_DEMO_MAGIC + b"repeat fixture"
+        first = client.post(
+            "/api/demos/upload", files={"file": ("one.dem", payload, "application/octet-stream")}
+        )
+        second = client.post(
+            "/api/demos/upload", files={"file": ("two.dem", payload, "application/octet-stream")}
+        )
+
+        assert first.status_code == second.status_code == 201
+        assert first.json()["id"] == second.json()["id"]
+        assert second.json()["duplicate"] is True
+
+    def test_rejects_zstandard_and_legacy_files(self, client: TestClient) -> None:
+        responses = [
+            client.post(
+                "/api/demos/upload",
+                files={
+                    "file": ("compressed.dem", b"\x28\xb5\x2f\xfddata", "application/octet-stream")
+                },
+            ),
+            client.post(
+                "/api/demos/upload",
+                files={"file": ("legacy.dem", b"HL2DEMO\0old", "application/octet-stream")},
+            ),
+        ]
+        assert [response.status_code for response in responses] == [415, 415]
+
+    def test_parse_job_is_queued_and_can_be_cancelled(self, client: TestClient) -> None:
+        from autoclip.cs2demo.adapter import CS2_DEMO_MAGIC
+
+        uploaded = client.post(
+            "/api/demos/upload",
+            files={"file": ("cancel.dem", CS2_DEMO_MAGIC + b"fixture", "application/octet-stream")},
+        )
+        queued = client.post(f"/api/demos/{uploaded.json()['id']}/parse")
+
+        assert queued.status_code == 202
+        assert queued.json()["status"] == "queued"
+        job_id = queued.json()["id"]
+        cancelled = client.post(f"/api/demos/jobs/{job_id}/cancel")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["status"] == "cancelled"
+        assert client.get(f"/api/demos/jobs/{job_id}").json()["status"] == "cancelled"
 
     def test_inverted_durations_are_rejected(self, client: TestClient, source: Source) -> None:
         response = client.post(

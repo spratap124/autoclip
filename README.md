@@ -40,6 +40,11 @@ Pre-1.0. The reframe quality bar hasn't been validated against a fixed golden se
 
 `autoclip doctor` checks all of this and tells you exactly what to fix. Run it before anything else.
 
+For a Windows installation, use the [Windows setup guide](docs/WINDOWS_SETUP.md)
+and [migration checklist](docs/WINDOWS_MIGRATION_CHECKLIST.md). The Windows
+guide covers a fresh clone and data directory; Mac databases and uploaded media
+are local files and are not included in Git.
+
 ### Installing ffmpeg correctly
 
 Captions are burned in with **libass**, and on two platforms the obvious package doesn't include it. It installs cleanly, then fails to burn a single caption.
@@ -87,6 +92,28 @@ autoclip serve
 ```
 
 That opens `http://localhost:8000`. If you don't use [uv](https://docs.astral.sh/uv/), a plain `python -m venv .venv` and `pip install -e ".[dev]"` works the same way.
+
+### Analyze a CS2 demo locally
+
+Open **CS2 demos** in the app to upload a local Counter-Strike 2 `.dem`, inspect
+its parsed player roster, choose a SteamID-backed player, and review event-based
+highlights. Demo files are parsed and cached locally; this workflow does not use
+OCR, video pixels, cloud services, or video synchronization. The demo feature
+and its validated event schema are documented in
+[CS2 Demo Highlight Detection](docs/CS2_DEMO_HIGHLIGHT_DETECTION.md) and
+[Demo Event Schema](docs/DEMO_EVENT_SCHEMA.md).
+
+For a local CLI analysis:
+
+```bash
+autoclip cs2demo players match.dem
+autoclip cs2demo analyze match.dem --steamid 7656119XXXXXXXXXX
+```
+
+The parser preserves ticks as the canonical time. Seconds need tick-rate
+metadata or an explicit override; demo timestamps do not synchronize to a
+gameplay MP4. The current event grouping uses round totals conservatively and
+has not been measured against manually labeled match footage.
 
 ### Add a provider
 

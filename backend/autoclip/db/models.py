@@ -17,6 +17,8 @@ from typing import Any, Literal
 SourceType = Literal["youtube", "upload"]
 JobStatus = Literal["queued", "running", "failed", "done", "cancelled"]
 ClipStatus = Literal["candidate", "kept", "discarded", "exported"]
+DemoParseStatus = Literal["uploaded", "parsing", "parsed", "failed", "cancelled"]
+DemoJobStatus = Literal["queued", "running", "done", "failed", "cancelled"]
 
 
 def new_id() -> str:
@@ -63,6 +65,64 @@ class Source:
             has_audio=bool(row["has_audio"]),
             has_video=bool(row["has_video"]),
             created_at=row["created_at"],
+        )
+
+
+@dataclass
+class DemoFile:
+    id: str
+    content_sha256: str
+    file_path: str
+    original_filename: str
+    size_bytes: int
+    parser_version: str = ""
+    schema_version: int = 1
+    parse_status: DemoParseStatus = "uploaded"
+    warnings: list[str] = field(default_factory=list)
+    created_at: str = field(default_factory=utcnow)
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> DemoFile:
+        return cls(
+            id=row["id"],
+            content_sha256=row["content_sha256"],
+            file_path=row["file_path"],
+            original_filename=row["original_filename"],
+            size_bytes=row["size_bytes"],
+            parser_version=row["parser_version"],
+            schema_version=row["schema_version"],
+            parse_status=row["parse_status"],
+            warnings=json.loads(row["warnings_json"] or "[]"),
+            created_at=row["created_at"],
+        )
+
+
+@dataclass
+class DemoParseJob:
+    id: str
+    demo_id: str
+    status: DemoJobStatus = "queued"
+    current_stage: str = "queued"
+    progress: float = 0.0
+    error: str | None = None
+    created_at: str = field(default_factory=utcnow)
+    updated_at: str = field(default_factory=utcnow)
+    started_at: str | None = None
+    finished_at: str | None = None
+
+    @classmethod
+    def from_row(cls, row: sqlite3.Row) -> DemoParseJob:
+        return cls(
+            id=row["id"],
+            demo_id=row["demo_id"],
+            status=row["status"],
+            current_stage=row["current_stage"],
+            progress=row["progress"],
+            error=row["error"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
         )
 
 

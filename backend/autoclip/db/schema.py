@@ -111,9 +111,78 @@ def _migration_v2(conn: sqlite3.Connection) -> None:
     conn.execute("ALTER TABLE clips ADD COLUMN evidence_ids_json TEXT NOT NULL DEFAULT '[]'")
 
 
+def _migration_v3(conn: sqlite3.Connection) -> None:
+    """Register local CS2 demos without changing video-source workflows."""
+    conn.executescript(
+        """
+        CREATE TABLE demos (
+            id                TEXT PRIMARY KEY,
+            content_sha256    TEXT NOT NULL UNIQUE,
+            file_path         TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            size_bytes        INTEGER NOT NULL CHECK (size_bytes > 0),
+            parser_version    TEXT NOT NULL DEFAULT '',
+            schema_version    INTEGER NOT NULL DEFAULT 1,
+            parse_status      TEXT NOT NULL DEFAULT 'uploaded' CHECK (
+                parse_status IN ('uploaded','parsing','parsed','failed','cancelled')
+            ),
+            warnings_json     TEXT NOT NULL DEFAULT '[]',
+            created_at        TEXT NOT NULL
+        );
+        CREATE INDEX idx_demos_created ON demos(created_at DESC);
+        """
+    )
+
+
+def _migration_v4(conn: sqlite3.Connection) -> None:
+    """Persist parse jobs separately from the existing video job queue."""
+    conn.executescript(
+        """
+        CREATE TABLE demo_jobs (
+            id            TEXT PRIMARY KEY,
+            demo_id       TEXT NOT NULL REFERENCES demos(id) ON DELETE CASCADE,
+            status        TEXT NOT NULL CHECK (
+                status IN ('queued','running','done','failed','cancelled')
+            ),
+            current_stage TEXT NOT NULL DEFAULT 'queued',
+            progress      REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
+            error         TEXT,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL,
+            started_at    TEXT,
+            finished_at   TEXT
+        );
+        CREATE INDEX idx_demo_jobs_status ON demo_jobs(status, created_at);
+        """
+    )
+
+
+def _migration_v5(conn: sqlite3.Connection) -> None:
+    """Persist deterministic per-player demo analyses without event duplication."""
+    conn.executescript(
+        """
+        CREATE TABLE demo_analyses (
+            demo_id         TEXT NOT NULL REFERENCES demos(id) ON DELETE CASCADE,
+            player_id       TEXT NOT NULL,
+            settings_hash   TEXT NOT NULL,
+            result_json     TEXT NOT NULL,
+            created_at      TEXT NOT NULL,
+            PRIMARY KEY (demo_id, player_id, settings_hash)
+        );
+        CREATE INDEX idx_demo_analyses_demo ON demo_analyses(demo_id);
+        """
+    )
+
+
 #: Ordered migrations. Index + 1 is the resulting ``user_version``.
 #: Append only — never edit a migration that has shipped.
-MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [_migration_v1, _migration_v2]
+MIGRATIONS: list[Callable[[sqlite3.Connection], None]] = [
+    _migration_v1,
+    _migration_v2,
+    _migration_v3,
+    _migration_v4,
+    _migration_v5,
+]
 
 SCHEMA_VERSION = len(MIGRATIONS)
 

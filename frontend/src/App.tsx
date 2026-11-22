@@ -30,6 +30,7 @@ export function App() {
             <TopLink to="/" end>
               New
             </TopLink>
+            <TopLink to="/demos">CS2 demos</TopLink>
             <TopLink to="/settings">Settings</TopLink>
           </nav>
 

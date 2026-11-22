@@ -52,6 +52,80 @@ class SourceOut(BaseModel):
         )
 
 
+class DemoUploadOut(BaseModel):
+    id: str
+    original_filename: str
+    size_bytes: int
+    content_sha256: str
+    parse_status: str
+    warnings: list[str]
+    duplicate: bool = False
+
+    @classmethod
+    def of(cls, demo: models.DemoFile, *, duplicate: bool = False) -> DemoUploadOut:
+        return cls(
+            id=demo.id,
+            original_filename=demo.original_filename,
+            size_bytes=demo.size_bytes,
+            content_sha256=demo.content_sha256,
+            parse_status=demo.parse_status,
+            warnings=demo.warnings,
+            duplicate=duplicate,
+        )
+
+
+class DemoPlayerOut(BaseModel):
+    session_id: str
+    steamid: int | None
+    name: str | None
+    team_number: int | None
+    name_history: list[str] = Field(default_factory=list)
+
+
+class DemoMatchOut(BaseModel):
+    demo_id: str
+    content_sha256: str
+    parser_version: str
+    schema_version: int
+    header: dict[str, str]
+    players: list[DemoPlayerOut]
+    event_counts: dict[str, int]
+    warnings: list[str]
+    round_count: int = 0
+    match_score: dict[str, int] = Field(default_factory=dict)
+    duration_s: float | None = None
+    match_type: str = "unknown"
+    cache_hit: bool = False
+
+
+class DemoParseJobOut(BaseModel):
+    id: str
+    demo_id: str
+    status: str
+    current_stage: str
+    progress: float
+    error: str | None = None
+    created_at: str
+    updated_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+
+    @classmethod
+    def of(cls, job: models.DemoParseJob) -> DemoParseJobOut:
+        return cls(
+            id=job.id,
+            demo_id=job.demo_id,
+            status=job.status,
+            current_stage=job.current_stage,
+            progress=job.progress,
+            error=job.error,
+            created_at=job.created_at,
+            updated_at=job.updated_at,
+            started_at=job.started_at,
+            finished_at=job.finished_at,
+        )
+
+
 class YouTubeIngestIn(BaseModel):
     url: str
     cookies_from_browser: str | None = None
@@ -247,6 +321,7 @@ class SettingsOut(BaseModel):
     whisper: dict[str, Any]
     clips: dict[str, Any]
     ingest: dict[str, Any]
+    cs2_demo: dict[str, Any]
     export: dict[str, Any]
     insecure_secret_storage: bool
     #: Which providers have a key stored. The keys themselves never leave the
@@ -260,6 +335,7 @@ class SettingsIn(BaseModel):
     whisper: dict[str, Any] | None = None
     clips: dict[str, Any] | None = None
     ingest: dict[str, Any] | None = None
+    cs2_demo: dict[str, Any] | None = None
     export: dict[str, Any] | None = None
 
 

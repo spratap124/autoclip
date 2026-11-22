@@ -103,6 +103,11 @@ def source_media_dir(source_id: str) -> Path:
     return media_dir() / source_id
 
 
+def demo_media_dir(demo_id: str) -> Path:
+    """Return the directory holding a local uploaded CS2 demo."""
+    return media_dir() / "demos" / demo_id
+
+
 def ensure_layout() -> Path:
     """Create the directory tree if absent and return the root.
 

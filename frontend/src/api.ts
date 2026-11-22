@@ -156,6 +156,21 @@ export interface Settings {
     cookies_from_browser: string
     prefer_youtube_captions: boolean
   }
+  cs2_demo: {
+    max_upload_bytes: number
+    parser_timeout_s: number
+    parser_memory_limit_mb: number
+    tick_rate_override: number | null
+    pre_roll_s: number
+    post_roll_s: number
+    won_clutch_post_roll_s: number
+    min_clip_duration_s: number
+    max_clip_duration_s: number
+    fast_multi_kill_s: number
+    headshot_streak_kills: number
+    strict_clutches: boolean
+    default_visible_tags: string[]
+  }
   export: {
     ratio: string
     caption_style: string
@@ -179,6 +194,77 @@ export interface SystemStatus {
   gpu_name: string | null
   compute_type: string
   diarization_available: boolean
+}
+
+export interface DemoUpload {
+  id: string
+  original_filename: string
+  size_bytes: number
+  content_sha256: string
+  parse_status: string
+  warnings: string[]
+  duplicate: boolean
+}
+
+export interface DemoParseJob {
+  id: string
+  demo_id: string
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
+  current_stage: string
+  progress: number
+  error: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface DemoMatch {
+  demo_id: string
+  content_sha256: string
+  parser_version: string
+  schema_version: number
+  header: Record<string, string>
+  players: { session_id: string; steamid: number | null; name: string | null; name_history: string[]; team_number: number | null }[]
+  event_counts: Record<string, number>
+  warnings: string[]
+  round_count: number
+  match_score: Record<string, number>
+  duration_s: number | null
+  match_type: string
+  cache_hit: boolean
+}
+
+export interface DemoRosterPlayer {
+  player_id: string
+  session_id: string
+  steamid: number | null
+  name: string | null
+  name_history: string[]
+  team_number: number | null
+  kills: number
+  deaths: number
+  assists: number
+  adr: number | null
+  selectable: boolean
+}
+
+export interface DemoHighlight {
+  highlight_id: string
+  round_id: string
+  round_number: number
+  tags: string[]
+  score: number
+  score_breakdown: Record<string, number>
+  start_tick: number
+  end_tick: number
+  start_seconds: number | null
+  end_seconds: number | null
+  kill_count: number
+  kill_event_ids: string[]
+  source_event_ids: string[]
+  kills: Record<string, unknown>[]
+  clutch: Record<string, unknown> | null
+  data_quality_warnings: string[]
+  timing_warning: string | null
 }
 
 export interface JobSettingsOverrides {
@@ -274,6 +360,76 @@ export const api = {
     form.append('file', file)
     return request<Source>('/api/sources/upload', { method: 'POST', body: form })
   },
+
+  uploadDemo: (
+    file: File,
+    onProgress: (loaded: number, total: number) => void,
+    signal?: AbortSignal,
+  ) =>
+    new Promise<DemoUpload>((resolve, reject) => {
+      const form = new FormData()
+      form.append('file', file)
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/demos/upload')
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) onProgress(event.loaded, event.total)
+      }
+      signal?.addEventListener('abort', () => xhr.abort(), { once: true })
+      xhr.onabort = () => reject(new ApiError('Demo upload was cancelled.', 0))
+      xhr.onerror = () => reject(new ApiError('Demo upload failed.', 0))
+      xhr.onload = () => {
+        let body: Record<string, unknown> = {}
+        try {
+          body = JSON.parse(xhr.responseText) as Record<string, unknown>
+        } catch {
+          /* The status is enough when the server returned a non-JSON body. */
+        }
+        if (xhr.status >= 200 && xhr.status < 300) resolve(body as unknown as DemoUpload)
+        else reject(new ApiError(String(body.detail ?? `Upload failed (${xhr.status}).`), xhr.status))
+      }
+      xhr.send(form)
+    }),
+  startDemoParse: (demoId: string) =>
+    request<DemoParseJob>(`/api/demos/${demoId}/parse`, { method: 'POST' }),
+  getDemo: (demoId: string) => request<DemoUpload>(`/api/demos/${demoId}`),
+  getDemoParseJob: (jobId: string) => request<DemoParseJob>(`/api/demos/jobs/${jobId}`),
+  cancelDemoParse: (jobId: string) =>
+    request<DemoParseJob>(`/api/demos/jobs/${jobId}/cancel`, { method: 'POST' }),
+  getDemoMatch: (demoId: string) => request<DemoMatch>(`/api/demos/${demoId}/match`),
+  getDemoPlayers: (demoId: string) =>
+    request<{ demo_id: string; players: DemoRosterPlayer[]; warnings: string[] }>(
+      `/api/demos/${demoId}/players`,
+    ),
+  getDemoRounds: (demoId: string, playerId?: string) =>
+    request<{ rounds: Record<string, unknown>[]; warnings: string[] }>(
+      `/api/demos/${demoId}/rounds${playerId ? `?player_id=${encodeURIComponent(playerId)}` : ''}`,
+    ),
+  getDemoAnalysis: (
+    demoId: string,
+    playerId: string,
+    params: {
+      tag?: string
+      round_number?: number
+      minimum_score?: number
+      sort?: string
+      offset?: number
+      limit?: number
+    } = {},
+  ) => {
+    const query = new URLSearchParams()
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined) query.set(key, String(value))
+    }
+    return request<{
+      total: number
+      highlights: DemoHighlight[]
+      warnings: string[]
+      offset: number
+      limit: number
+    }>(`/api/demos/${demoId}/analysis/${encodeURIComponent(playerId)}?${query}`)
+  },
+  demoExportUrl: (demoId: string, playerId: string, format: 'json' | 'csv' | 'timestamps') =>
+    `/api/demos/${demoId}/analysis/${encodeURIComponent(playerId)}/export/${format}`,
 
   listJobs: (limit = 25) => request<Job[]>(`/api/jobs?limit=${limit}`),
   getJob: (id: string) => request<Job>(`/api/jobs/${id}`),

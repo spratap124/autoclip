@@ -25,6 +25,7 @@ def _settings_out(settings: config.Settings) -> SettingsOut:
         whisper=payload["whisper"],
         clips=payload["clips"],
         ingest=payload["ingest"],
+        cs2_demo=payload["cs2_demo"],
         export=payload["export"],
         insecure_secret_storage=payload["insecure_secret_storage"],
         keys_present={
@@ -53,7 +54,7 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
             )
         settings.active_provider = updates["active_provider"]
 
-    for section in ("whisper", "clips", "ingest", "export"):
+    for section in ("whisper", "clips", "ingest", "cs2_demo", "export"):
         if section in updates:
             current = getattr(settings, section)
             try:
@@ -77,6 +78,11 @@ async def put_settings(payload: SettingsIn) -> SettingsOut:
     if settings.clips.min_duration_s >= settings.clips.max_duration_s:
         raise HTTPException(
             status_code=400, detail="Minimum clip length must be below the maximum."
+        )
+    if settings.cs2_demo.min_clip_duration_s > settings.cs2_demo.max_clip_duration_s:
+        raise HTTPException(
+            status_code=400,
+            detail="Minimum CS2 suggested duration cannot exceed the maximum.",
         )
 
     config.save(settings)
